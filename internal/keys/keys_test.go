@@ -203,6 +203,8 @@ func TestFromCascadesModifierKeys(t *testing.T) {
 		{"an é with the E key's cap", 0xE9, 'e', "é", false, false, false, "é"},
 		{"an è typed with nothing held", 0xE8, 0xE8, "è", false, false, false, "è"},
 		{"a letter", 'a', 'a', "a", false, false, false, "a"},
+		// Any key's code may come cut so, its cap still a code.
+		{"Delete as its low byte", 0xFF, CodeDelete, "ÿ", false, false, false, "\x1b[3~"},
 	}
 	for _, c := range cases {
 		var tr Translator

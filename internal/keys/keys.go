@@ -100,6 +100,11 @@ type Raw struct {
 // reports no repeats; a held key arrives as repeated presses.
 func FromCascades(key, keycap int, text string, pressed, alt, shift, ctrl bool) Raw {
 	r := Raw{Down: pressed, Sym: rune(key), Cap: rune(keycap)}
+	// The Q10 may cut a key's code to its low byte (Delete 0xF0FF as 'ÿ');
+	// its cap still names a key that is no character.
+	if isCode(r.Cap) && r.Sym >= 0x80 && r.Sym < 0x100 {
+		r.Sym += codeBase
+	}
 	// The text is the better source of the character when there is one
 	// (key is documented as "the unicode of the key", which for a
 	// character is the same value). A key that is not a character is
@@ -297,12 +302,11 @@ func IsModifier(r Raw) bool {
 }
 
 // Translator turns Raw events into the library's key events. It holds the
-// sticky modifiers of the on-screen key bar and the keyboard's tapped Alt
-// and Shift (layer.go). It is not safe for use from several goroutines.
+// sticky modifiers of the on-screen key bar. It is not safe for use from
+// several goroutines.
 type Translator struct {
 	stickyCtrl bool
 	stickyAlt  bool
-	layers
 }
 
 // StickyCtrl arms or disarms the key bar's Ctrl for the next key.
@@ -334,7 +338,6 @@ func (t *Translator) Translate(r Raw) (input.KeyEvent, bool) {
 	if sym == 0 {
 		sym = cap
 	}
-	sym = t.layer(r, sym, cap)
 
 	ev := input.KeyEvent{Action: input.KeyActionRelease}
 	if r.Down {

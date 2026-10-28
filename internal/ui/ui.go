@@ -9,7 +9,7 @@ package ui
 
 /*
 #cgo CXXFLAGS: -Wno-unused-parameter
-#cgo LDFLAGS: -lbbcascades -lbbsystem -lQtDeclarative -lQtCore
+#cgo LDFLAGS: -lbbcascades -lbbsystem -lbps -lQtDeclarative -lQtCore
 #include <stdlib.h>
 #include "ui.h"
 */

@@ -69,7 +69,10 @@ TabbedPane {
                 // Is there a newer PowerShell than the one that is here?
                 page.send("pwsh", { action: "check" })
             }
-            onClosed: page.covered = false
+            onClosed: {
+                page.covered = false
+                input.requestFocus()
+            }
         },
 
         // The terminal page, shown for every tab.
@@ -78,8 +81,6 @@ TabbedPane {
 
             property bool ctrl: false
             property bool alt: false
-            property int layerAlt: 0   // the keyboard's tapped Alt: 0 off, 1 for the next key, 2 locked
-            property int layerShift: 0 // and its Shift
             property bool letGo: false       // the input field is letting go of the focus by our own call
             property bool created: false     // the terminal's window has been asked for
             property string termBackground: "#101418" // the theme's, around the terminal
@@ -117,13 +118,17 @@ TabbedPane {
             }
 
             // Tells Go where the terminal goes and how big it is: the first time
-            // it creates the window, afterwards it resizes it.
+            // it creates the window, afterwards it resizes it. The first time
+            // the input field also takes the focus, and the on-screen rows that
+            // come with it are put away: the app opens at full height.
             function sized(frame) {
                 if (frame.width <= 0 || frame.height <= 0)
                     return
                 if (!created) {
                     created = true
                     send("window", { group: fwc.windowGroup, id: fwc.windowId, w: frame.width, h: frame.height })
+                    input.requestFocus()
+                    bridge.hideKeyboard()
                 } else {
                     send("size", { w: frame.width, h: frame.height })
                 }
@@ -134,8 +139,6 @@ TabbedPane {
                     var s = JSON.parse(json)
                     if (s.ctrl !== undefined) page.ctrl = s.ctrl
                     if (s.alt !== undefined) page.alt = s.alt
-                    if (s.layerAlt !== undefined) page.layerAlt = s.layerAlt
-                    if (s.layerShift !== undefined) page.layerShift = s.layerShift
                     if (s.cw !== undefined) page.cellW = s.cw
                     if (s.selected !== undefined) page.selected = s.selected
                     if (s.selBarX !== undefined) page.selBarX = s.selBarX
@@ -227,10 +230,10 @@ TabbedPane {
             ]
 
             // The input field gives up the focus only when this page lets
-            // it go (a tap on the terminal with the rows up, the settings
-            // sheet); a loss to anything else (see the input field for why
-            // a touch hardly ever takes it) is undone at the moment it
-            // happens.
+            // it go (the settings sheet, and for a moment a tap that brings
+            // the rows back); a loss to anything else (see the input field
+            // for why a touch hardly ever takes it) is undone at the moment
+            // it happens.
             function letGoOfFocus() {
                 if (input.focused) {
                     page.letGo = true
@@ -238,26 +241,27 @@ TabbedPane {
                 }
             }
 
-            // Keys reach the shell in one of two ways. Until the terminal is
-            // tapped nothing has the focus, and the page's key listener below sends
-            // every key. A tap gives the hidden input field the focus, which makes
-            // the phone show its on-screen keyboard rows (so that symbols can be
-            // typed); then characters come through the field, its key listener
-            // sends only the keys that are not characters (Backspace, Tab, Escape,
-            // the arrows), and Enter is the field's "submitted".
+            // Keys reach the shell through the hidden input field, which has
+            // the focus from the start: characters come from the field, so the
+            // phone's keyboard does all it does in its own fields (tapped and
+            // held Alt and Shift with the system's indicator, the symbol key's
+            // picker, a held key's accents); its key listener sends only the
+            // keys that are not characters (Backspace, Tab, Escape, the
+            // arrows), and Enter is the field's "submitted". The page's key
+            // listener below sends every key in the moments the field has let
+            // go of the focus.
+            //
+            // The Q10 may cut a key's code to its low byte (Shift 0xF0E1 as á,
+            // Alt 0xF0E9 as é, Delete 0xF0FF as ÿ): such a key has a code for
+            // its cap, or is a modifier's byte with no cap of its own. Go
+            // knows it the same way (internal/keys).
             function isCharacterKey(event) {
                 var k = event.key
-                if (k == 13 || k == 10 || k == 0xF00D)
-                    return true // Enter: handled by the input field
-                // A modifier key whose code comes cut to its low byte (the
-                // Q10's Shift and Alt as á and é) is no character: Go
-                // knows it by its key cap (internal/keys).
                 var c = event.keycap
-                if (c >= 0xF0E1 && c <= 0xF0EA)
-                    return false
-                if ((c == k || c == 0) && (k == 0xE1 || k == 0xE2 || k == 0xE3 || k == 0xE4 || k == 0xE9 || k == 0xEA))
-                    return false
-                return k >= 0x20 && k != 0x7F && k < 0xF000
+                if (c >= 0xE000 && k >= 0x80 && k < 0x100
+                        || (c == k || c == 0) && (k == 0xE1 || k == 0xE2 || k == 0xE3 || k == 0xE4 || k == 0xE9 || k == 0xEA))
+                    k += 0xF000
+                return k == 13 || k == 10 || k == 0xF00D || k >= 0x20 && k != 0x7F && k < 0xE000
             }
             keyListeners: KeyListener {
                 onKeyPressed: {
@@ -273,18 +277,21 @@ TabbedPane {
                 layout: DockLayout {}
                 background: Color.create(page.termBackground)
 
-                // The input field: while it has the focus the phone shows its
-                // on-screen keyboard rows, as for any text field. What is typed
-                // goes to the shell at once and the field is emptied. It is not
-                // seen, and lies under the rest of the page so that it takes no room
-                // (in the column it kept its height although it was told to have
-                // none).
+                // The input field: it keeps the focus, and where the phone has
+                // on-screen keyboard rows (the Passport's top row, a touch
+                // phone's keyboard) they show with it, as for any text field. What
+                // is typed goes to the shell at once and the field is emptied. It
+                // lies under the rest of the page (the terminal's window and the
+                // key bar) so that it is not seen and takes no room (in the column
+                // it kept its height although it was told to have none). It is not
+                // transparent: the phone opens no symbol picker for a field it
+                // takes for invisible.
                 TextField {
                     id: input
-                    opacity: 0
-                    // Only this page gives it the focus (requestFocus, on a
-                    // tap on the terminal): never a key, a touch or the
-                    // phone's key navigation. Left to itself the field was
+                    backgroundVisible: false
+                    // Only this page gives it the focus (requestFocus): never
+                    // a key, a touch or the phone's key navigation. Left to
+                    // itself the field was
                     // the page's one target for the Enter key, so Enter on
                     // the physical keyboard brought the on-screen rows up,
                     // which no other key did.
@@ -332,8 +339,8 @@ TabbedPane {
                 // window over this control's area. A vertical drag scrolls the
                 // scrollback. A press and hold selects the word under the finger
                 // (on text that is already selected it keeps the selection),
-                // and a selection has its bar of buttons. A tap brings up the on-screen
-                // keyboard rows (the phone's own swipe down puts them away).
+                // and a selection has its bar of buttons. A tap brings the on-screen
+                // keyboard rows up or puts them away.
                 Container {
                     horizontalAlignment: HorizontalAlignment.Fill
                     verticalAlignment: VerticalAlignment.Fill
@@ -456,15 +463,16 @@ TabbedPane {
                             // A tap brings the on-screen rows up, and puts them
                             // away when they are up; but while something is
                             // selected it only drops the selection, and leaves
-                            // the rows as they are. The phone's swipe down puts
-                            // the rows away and leaves the input field the
-                            // focus, which it then gives up and asks for
-                            // again, so that the rows show.
+                            // the rows as they are. Putting them away leaves
+                            // the input field the focus, as the phone's swipe
+                            // down does, so that the keyboard keeps working as
+                            // in a field; to bring them back the field gives
+                            // up the focus and asks for it again.
                             onTapped: {
                                 if (page.selected != "")
                                     page.send("unselect")
                                 else if (fwc.rowsUp())
-                                    page.letGoOfFocus()
+                                    bridge.hideKeyboard()
                                 else {
                                     page.letGoOfFocus()
                                     input.requestFocus()
@@ -672,41 +680,6 @@ TabbedPane {
                             preferredWidth: 81
                             preferredHeight: 81
                             layoutProperties: AbsoluteLayoutProperties { positionX: 0; positionY: 0 }
-                        }
-                    }
-                }
-                // What a tap of the keyboard's own Alt or Shift has armed
-                // (internal/keys, layer.go), in the terminal's top right
-                // corner as the phone shows it in its text fields: grey for
-                // the next key, in the primary colour when locked. It takes
-                // no touches.
-                Container {
-                    visible: page.layerAlt > 0 || page.layerShift > 0
-                    layout: StackLayout { orientation: LayoutOrientation.LeftToRight }
-                    horizontalAlignment: HorizontalAlignment.Right
-                    verticalAlignment: VerticalAlignment.Top
-                    topPadding: 8
-                    rightPadding: 8
-                    touchPropagationMode: TouchPropagationMode.None
-                    Container {
-                        visible: page.layerAlt > 0
-                        background: page.layerAlt == 2 ? ui.palette.primary : Color.create("#606060")
-                        leftPadding: 14; rightPadding: 14; topPadding: 4; bottomPadding: 4
-                        Label {
-                            text: page.layerAlt == 2 ? "ALT" : "alt"
-                            textStyle.fontSize: FontSize.Small
-                            textStyle.color: Color.White
-                        }
-                    }
-                    Container {
-                        visible: page.layerShift > 0
-                        background: page.layerShift == 2 ? ui.palette.primary : Color.create("#606060")
-                        leftPadding: 14; rightPadding: 14; topPadding: 4; bottomPadding: 4
-                        leftMargin: 8
-                        Label {
-                            text: page.layerShift == 2 ? "CAPS" : "shift"
-                            textStyle.fontSize: FontSize.Small
-                            textStyle.color: Color.White
                         }
                     }
                 }

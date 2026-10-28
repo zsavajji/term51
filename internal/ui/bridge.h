@@ -13,6 +13,8 @@ public:
     // The system clipboard, as plain text.
     Q_INVOKABLE void copy(const QString &text);
     Q_INVOKABLE QString paste();
+    // Puts the on-screen keyboard away; the field that has the focus keeps it.
+    Q_INVOKABLE void hideKeyboard();
 
 public slots:
     void postState(const QString &json);

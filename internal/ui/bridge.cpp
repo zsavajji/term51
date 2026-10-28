@@ -5,6 +5,7 @@
 #include <bb/cascades/Application>
 #include <bb/cascades/QmlDocument>
 #include <bb/system/Clipboard>
+#include <bps/virtualkeyboard.h>
 
 #include <QDeclarativeError>
 #include <QTextCodec>
@@ -32,6 +33,8 @@ QString Bridge::paste() {
     bb::system::Clipboard clipboard;
     return QString::fromUtf8(clipboard.value("text/plain"));
 }
+
+void Bridge::hideKeyboard() { virtualkeyboard_hide(); }
 
 void Bridge::postState(const QString &json) { emit state(json); }
 void Bridge::postEvent(const QString &json) { emit event(json); }
