@@ -13,6 +13,7 @@ import (
 
 	"term51/internal/arrowpad"
 	"term51/internal/cells"
+	"term51/internal/glide"
 	"term51/internal/keys"
 	"term51/internal/pwsh"
 	"term51/internal/selbar"
@@ -241,8 +242,13 @@ func (a *App) Run() error {
 	nameDue := time.NewTimer(tabname.Quiet)
 	nameDue.Stop()
 	defer nameDue.Stop()
+	// glider is the scroll that goes on after a flick (internal/glide). A
+	// key, a paste, another tab or a touch stops it.
+	var glider glide.Glide
+	var glideX, glideY int // where the finger lifted, for a program that reads the wheel
 	// show makes tab i the one on screen: its whole table is drawn.
 	show := func(i int) {
+		glider.Stop()
 		cur = i
 		rename(tabs[i])
 		tabs[i].rang = false
@@ -304,6 +310,7 @@ func (a *App) Run() error {
 			return
 		}
 		if raw.Down && !keys.IsModifier(raw) {
+			glider.Stop()
 			t.sess.ScrollToBottom()
 		}
 		if err := t.sess.Key(ev); err != nil {
@@ -453,6 +460,23 @@ func (a *App) Run() error {
 		}
 	}
 
+	// glides moves the glide on: the rows it has passed are scrolled as the
+	// finger's drag scrolls them.
+	var glideDue <-chan time.Time
+	glides := func() {
+		glideDue = nil
+		if cur < 0 || ch <= 0 {
+			return
+		}
+		n, again := glider.Update(float64(ch), time.Now())
+		if n != 0 {
+			tabs[cur].sess.Scroll(-n, glideX, glideY)
+		}
+		if again > 0 {
+			glideDue = time.After(again)
+		}
+	}
+
 	var pending <-chan time.Time // set while an update is due
 	var quiet <-chan time.Time   // set while a new size waits to be used
 	for {
@@ -522,6 +546,7 @@ func (a *App) Run() error {
 				}
 			case "paste":
 				if text, _ := c.Args["text"].(string); text != "" {
+					glider.Stop()
 					sess.ScrollToBottom()
 					_ = sess.Paste([]byte(text))
 				}
@@ -679,6 +704,14 @@ func (a *App) Run() error {
 				post()
 			case "scroll":
 				sess.Scroll(num(c.Args["rows"]), num(c.Args["x"]), num(c.Args["y"]))
+			case "glide":
+				// The finger lifted from a drag at v pixels a second
+				// (positive downwards) at x, y, or touched the terminal
+				// (v 0), which stops a glide.
+				v, _ := c.Args["v"].(float64)
+				glideX, glideY = num(c.Args["x"]), num(c.Args["y"])
+				glider.Start(v, time.Now())
+				glides()
 			case "newtab":
 				if t := open(); t != nil {
 					tabs = append(tabs, t)
@@ -769,6 +802,8 @@ func (a *App) Run() error {
 			}
 		case <-padDue:
 			arrows()
+		case <-glideDue:
+			glides()
 		case <-stretchDue:
 			scrollEdge()
 		case <-pending:

@@ -20,6 +20,7 @@ import (
 
 	"term51/internal/busybox"
 	"term51/internal/cells"
+	"term51/internal/glide"
 	"term51/internal/pwsh"
 	"term51/internal/selbar"
 	"term51/internal/settings"
@@ -815,6 +816,38 @@ func TestArrowPad(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if after := len(pads()); after != n {
 		t.Errorf("%d keys were sent after the finger lifted", after-n)
+	}
+	a.Quit()
+	if err := <-done; err != nil {
+		t.Errorf("Run returned %v", err)
+	}
+}
+
+// A flick of the terminal glides the view on after the finger lifts, the
+// way the finger went, and a touch stops it.
+func TestGlide(t *testing.T) {
+	a, p, done := startApp(t)
+	typeLine(a, "clear; for i in $(seq 1 30); do echo line-$i end; done")
+	wait(t, "the output", func() bool { return strings.Contains(p.screen(), "line-30 end") })
+	// The view is 8 rows: lines 24 to 30 and the prompt. A flick down
+	// that glides about 12 rows brings line 12 to the top.
+	ch := float64(p.scr.ch)
+	a.Send(Command{Name: "glide", Args: map[string]any{"v": 12.5*ch/glide.Tau.Seconds() + glide.Min, "x": 10.0, "y": 10.0}})
+	wait(t, "the view glided back", func() bool {
+		s := p.screen()
+		return strings.Contains(s, "line-15 end") && !strings.Contains(s, "line-21 end")
+	})
+
+	// A flick up that would glide 15 rows, back to the bottom, stopped by
+	// a touch once it is under way.
+	a.Send(Command{Name: "glide", Args: map[string]any{"v": -15 * ch / glide.Tau.Seconds(), "x": 10.0, "y": 10.0}})
+	wait(t, "the glide under way", func() bool { return strings.Contains(p.screen(), "line-21 end") })
+	a.Send(Command{Name: "glide", Args: map[string]any{"v": 0.0, "x": 10.0, "y": 10.0}})
+	time.Sleep(50 * time.Millisecond) // the loop takes the touch
+	before := p.screen()
+	time.Sleep(300 * time.Millisecond)
+	if after := p.screen(); after != before || strings.Contains(after, "line-30 end") {
+		t.Errorf("the glide went on after a touch:\n%s", after)
 	}
 	a.Quit()
 	if err := <-done; err != nil {

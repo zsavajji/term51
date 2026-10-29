@@ -337,7 +337,8 @@ TabbedPane {
 
                 // The terminal. Position, Size and Visible: Cascades keeps Go's
                 // window over this control's area. A vertical drag scrolls the
-                // scrollback. A press and hold selects the word under the finger
+                // scrollback, and a flick glides on after the finger lifts. A
+                // press and hold selects the word under the finger
                 // (on text that is already selected it keeps the selection),
                 // and a selection has its bar of buttons. A tap brings the on-screen
                 // keyboard rows up or puts them away.
@@ -358,6 +359,13 @@ TabbedPane {
                         property real touchX: 0 // where the finger went down,
                         property real downY: 0  // for the press and hold
                         property real touchY: 0 // the drag so far
+                        property bool moved: false // the finger has moved: a drag, not a hold
+                        // The finger's speed, for the glide after a flick
+                        // (internal/glide), in pixels a millisecond, and its
+                        // last move.
+                        property real speed: 0
+                        property real lastY: 0
+                        property real lastT: 0
                         property real w: 0      // the control's size
                         property real h: 0
                         // The largest height it has had at this width: the
@@ -484,11 +492,12 @@ TabbedPane {
                             // about to show the context menu. That menu is
                             // always stopped, and the arrow pad shown instead:
                             // 300 pixels square, above the finger, or below it
-                            // where there is no room above.
+                            // where there is no room above. A finger that has
+                            // already moved is scrolling, and gets no pad.
                             onPopulating: {
                                 event.abort()
-                                if (fwc.stretching)
-                                    return // a finger resting while it stretches
+                                if (fwc.stretching || fwc.moved)
+                                    return // a finger resting while it stretches or scrolls
                                 fwc.padDir = ""
                                 fwc.padFill = 0
                                 fwc.padAxis = ""
@@ -516,6 +525,11 @@ TabbedPane {
                                 fwc.downY = event.localY
                                 fwc.touchY = event.localY
                                 fwc.dropped = false
+                                fwc.moved = false
+                                fwc.speed = 0
+                                fwc.lastY = event.localY
+                                fwc.lastT = Date.now()
+                                page.send("glide", { v: 0 }) // a finger on the terminal stops a glide
                             } else if (event.isMove() && fwc.padOn) {
                                 fwc.padMove(event.localX - fwc.touchX, event.localY - fwc.downY)
                             } else if (event.isMove() && page.cellH > 0 && (fwc.stretching || page.selected == "open")) {
@@ -532,6 +546,16 @@ TabbedPane {
                                 fwc.stretching = false
                                 fwc.stretch("up", event.localX, event.localY)
                             } else if (event.isMove() && page.cellH > 0) {
+                                if (Math.abs(event.localX - fwc.touchX) > 12 || Math.abs(event.localY - fwc.downY) > 12)
+                                    fwc.moved = true
+                                // The speed, smoothed over the last moves; a
+                                // pause of more than 100 ms starts afresh (as
+                                // ChromeBerry's).
+                                var now = Date.now()
+                                var ms = now - fwc.lastT
+                                fwc.speed = ms > 100 ? 0 : 0.6 * (event.localY - fwc.lastY) / Math.max(ms, 4) + 0.4 * fwc.speed
+                                fwc.lastY = event.localY
+                                fwc.lastT = now
                                 if (page.selected == "done" && !fwc.dropped) {
                                     fwc.dropped = true
                                     page.send("unselect")
@@ -546,6 +570,10 @@ TabbedPane {
                                 page.send("pad", { phase: "lift" })
                                 if (event.isUp() && !fwc.padSwiped && page.cellW > 0 && page.cellH > 0)
                                     page.send("selectword", { x: Math.floor(fwc.touchX / page.cellW), y: Math.floor(fwc.downY / page.cellH) })
+                            } else if (event.isUp() && fwc.moved && Date.now() - fwc.lastT <= 80) {
+                                // A flick: the view glides on (internal/glide).
+                                // A finger that rested before it lifted leaves none.
+                                page.send("glide", { v: fwc.speed * 1000, x: Math.round(event.localX), y: Math.round(event.localY) })
                             }
                         }
                     }
