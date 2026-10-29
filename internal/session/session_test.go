@@ -86,6 +86,29 @@ func TestKeysAndPasteReachTheShell(t *testing.T) {
 	waitText(t, s, "got<hi there>")
 }
 
+// A program that leaves erasing to the terminal driver (the phone's ksh,
+// here cat) can erase back across the start of a row the line wrapped into:
+// the driver's "\b \b" knows no rows.
+func TestEraseAcrossAWrap(t *testing.T) {
+	s := start(t, `stty icanon echo echoe; printf ready; exec cat`)
+	waitText(t, s, "ready")
+	if err := s.Paste([]byte("\r" + strings.Repeat("x", 39) + "abc")); err != nil {
+		t.Fatal(err)
+	}
+	waitText(t, s, "bc")
+	for range 3 {
+		if err := s.Key(input.KeyEvent{Action: input.KeyActionPress, Key: input.KeyBackspace}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Paste([]byte("Z")); err != nil {
+		t.Fatal(err)
+	}
+	if text := waitText(t, s, "Z"); !strings.Contains(text, strings.Repeat("x", 39)+"Z") {
+		t.Errorf("screen: %q", text)
+	}
+}
+
 func TestResizeReachesTheShell(t *testing.T) {
 	s := start(t, `trap 'printf "size=%s " "$(stty size)"' WINCH; printf ready; while :; do sleep 0.1; done`)
 	waitText(t, s, "ready")

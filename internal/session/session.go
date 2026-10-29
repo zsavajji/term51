@@ -212,12 +212,19 @@ type Session struct {
 
 // Start starts the shell and the reader.
 func Start(cfg Config) (*Session, error) {
+	// Reverse wrap (DECSET 45, xterm's reverseWrap): a backspace at the
+	// start of a row that the row above wrapped into goes back onto it. A
+	// shell without line editing (the phone's ksh) leaves erasing to the
+	// terminal driver, whose "\b \b" knows no rows. Programs that read
+	// terminfo never backspace at the start of a row (xterm has no bw).
+	modes := vt.NewModeState()
+	modes.Set(vt.ModeReverseWrap, true)
 	term, err := vt.NewTerminal(vt.TerminalOptions{
 		Cols:          uint16(cfg.Cols),
 		Rows:          uint16(cfg.Rows),
 		MaxScrollback: cfg.MaxScrollback,
 		Colors:        cfg.Theme.colors(),
-		DefaultModes:  vt.NewModePacked(),
+		DefaultModes:  modes.Values,
 	})
 	if err != nil {
 		return nil, err
